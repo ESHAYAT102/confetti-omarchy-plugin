@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "esh.confetti",
+  "name": "Confetti",
+  "version": "1.0.0",
+  "author": "Eshayat Al-Wasiu",
+  "license": "MIT",
+  "description": "Fire colorful confetti across every monitor.",
+  "kinds": ["service"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}

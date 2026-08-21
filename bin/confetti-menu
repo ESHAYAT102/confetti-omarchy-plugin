@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import tempfile
+
+PLUGIN_ID = "esh.confetti"
+ENTRY_ID = "trigger.confetti"
+MARKER_START = "// BEGIN esh.confetti menu entry"
+MARKER_END = "// END esh.confetti menu entry"
+ENTRY = f'''  {MARKER_START}
+  "{ENTRY_ID}": {{
+    "icon": "󰇵",
+    "label": "Confetti",
+    "description": "Fire confetti across every monitor",
+    "when": "omarchy-shell {PLUGIN_ID} state >/dev/null 2>&1",
+    "action": "omarchy-shell {PLUGIN_ID} fire"
+  }}
+  {MARKER_END}'''
+
+
+def strip_comments(source):
+    output = []
+    index = 0
+    in_string = False
+    escaped = False
+
+    while index < len(source):
+        char = source[index]
+        following = source[index + 1] if index + 1 < len(source) else ""
+
+        if in_string:
+            output.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if char == '"':
+            in_string = True
+            output.append(char)
+            index += 1
+        elif char == "/" and following == "/":
+            output.extend("  ")
+            index += 2
+            while index < len(source) and source[index] != "\n":
+                output.append(" ")
+                index += 1
+        elif char == "/" and following == "*":
+            output.extend("  ")
+            index += 2
+            while index < len(source):
+                if source[index:index + 2] == "*/":
+                    output.extend("  ")
+                    index += 2
+                    break
+                output.append("\n" if source[index] == "\n" else " ")
+                index += 1
+        else:
+            output.append(char)
+            index += 1
+
+    return "".join(output)
+
+
+def parse_jsonc(source):
+    without_comments = strip_comments(source)
+    without_trailing_commas = re.sub(r",(\s*[}\]])", r"\1", without_comments)
+    value = json.loads(without_trailing_commas)
+    if not isinstance(value, dict):
+        raise ValueError("menu extension must contain a top-level object")
+    return value
+
+
+def write_atomic(path, content):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(content)
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    except BaseException:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+        raise
+
+
+def install(path):
+    source = path.read_text(encoding="utf-8") if path.exists() else "{}\n"
+    items = parse_jsonc(source)
+
+    if MARKER_START in source:
+        print("Confetti is already in the Omarchy Trigger menu.")
+        return
+    if ENTRY_ID in items:
+        raise ValueError(f"menu entry '{ENTRY_ID}' already exists and is not managed by this plugin")
+
+    trimmed_length = len(source.rstrip())
+    if trimmed_length == 0 or source[trimmed_length - 1] != "}":
+        raise ValueError("menu extension does not end with a top-level object")
+
+    closing_brace = trimmed_length - 1
+    prefix = source[:closing_brace]
+    content_end = len(prefix.rstrip())
+    significant_prefix = strip_comments(prefix[:content_end]).rstrip()
+    separator = "," if items and not significant_prefix.endswith(",") else ""
+    before_entry = prefix[:content_end] + separator + prefix[content_end:]
+    if not before_entry.endswith("\n"):
+        before_entry += "\n"
+    updated = before_entry + ENTRY + "\n" + source[closing_brace:]
+    parse_jsonc(updated)
+    write_atomic(path, updated)
+    print("Added Confetti to the Omarchy Trigger menu.")
+
+
+def remove(path):
+    if not path.exists():
+        print("Confetti is not in the Omarchy Trigger menu.")
+        return
+
+    source = path.read_text(encoding="utf-8")
+    marker = source.find(MARKER_START)
+    if marker == -1:
+        print("Confetti is not in the Omarchy Trigger menu.")
+        return
+
+    block_start = source.rfind("\n", 0, marker) + 1
+    marker_end = source.find(MARKER_END, marker)
+    if marker_end == -1:
+        raise ValueError("Confetti menu entry has a start marker but no end marker")
+    block_end = source.find("\n", marker_end)
+    block_end = len(source) if block_end == -1 else block_end + 1
+
+    before = source[:block_start].rstrip()
+    if before.endswith(","):
+        before = before[:-1].rstrip()
+    after = source[block_end:].lstrip("\n")
+    updated = before + "\n" + after
+    parse_jsonc(updated)
+    write_atomic(path, updated)
+    print("Removed Confetti from the Omarchy Trigger menu.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Manage the Confetti Omarchy menu entry.")
+    parser.add_argument("action", choices=("install", "remove"))
+    arguments = parser.parse_args()
+
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    menu_path = config_home / "omarchy" / "extensions" / "omarchy-menu.jsonc"
+    try:
+        globals()[arguments.action](menu_path)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        parser.exit(1, f"confetti-menu: {error}\n")
+
+
+if __name__ == "__main__":
+    main()
