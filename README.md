@@ -1,10 +1,17 @@
 # Confetti for Omarchy
 
-A native Omarchy Quattro plugin for Raycast-style confetti on Linux.
+A native Omarchy Quattro plugin for Raycast-style confetti on Linux. Particle
+simulation and rendering run in a persistent Go process instead of QML's
+JavaScript canvas.
 
 ## Install
 
-Install and enable the plugin through Omarchy's Git-based plugin manager:
+Install the build and rendering dependencies, then install and enable the
+plugin through Omarchy's Git-based plugin manager:
+
+```sh
+omarchy pkg add go gtk4-layer-shell
+```
 
 ```sh
 omarchy plugin add https://github.com/ESHAYAT102/confetti-omarchy-plugin.git --enable
@@ -67,15 +74,17 @@ Run the command directly, use your configured shortcut, or choose
 omarchy-shell esh.confetti fire
 ```
 
-Triggering the command again while confetti is active adds another burst.
-The overlay closes automatically after the last particle leaves the screen.
+Triggering the command again while confetti is active adds another burst. The
+transparent overlay stays ready between bursts but consumes no animation CPU
+while idle.
 
 ## Permissions and dependencies
 
 Omarchy plugins run unsandboxed with the current user's permissions. This
 plugin does not access the network, request elevated privileges, or start
-another Quickshell process. Each trigger runs only this read-only command
-before starting the animation:
+another Quickshell process. On first load, its launcher compiles the included
+Go source into `~/.cache/esh.confetti/confetti`; later loads reuse that binary
+until the source changes. Each trigger checks this animation preference:
 
 ```sh
 gsettings get org.gnome.desktop.interface enable-animations
@@ -101,8 +110,11 @@ Then remove any keybinding you added and uninstall the plugin:
 omarchy plugin remove esh.confetti
 ```
 
-The plugin stores no state. Following the removal steps leaves no files or
-menu entries outside its Omarchy-managed plugin directory.
+Remove the compiled cache after uninstalling if you do not plan to reinstall:
+
+```sh
+rm -rf ~/.cache/esh.confetti
+```
 
 ## Development
 
@@ -112,9 +124,11 @@ Validate the repository root against Omarchy's manifest rules:
 omarchy plugin validate .
 ```
 
-Lint the QML entry point against the installed shell imports:
+Test the Go renderer and lint the QML IPC adapter:
 
 ```sh
+go test ./...
+go vet ./...
 /usr/lib/qt6/bin/qmllint -I "${OMARCHY_PATH:-/usr/share/omarchy}/shell" Service.qml
 ```
 

@@ -1,0 +1,28 @@
+#!/bin/sh
+
+set -eu
+
+plugin_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cache_dir=${XDG_CACHE_HOME:-"$HOME/.cache"}/esh.confetti
+binary=$cache_dir/confetti
+source_file=$plugin_dir/cmd/confetti/main.go
+
+if [ ! -x "$binary" ] || [ "$plugin_dir/go.mod" -nt "$binary" ] || [ "$source_file" -nt "$binary" ]; then
+  command -v go >/dev/null 2>&1 || {
+    printf '%s\n' "confetti: Go is required (install it with: omarchy pkg add go)" >&2
+    exit 1
+  }
+  pkg-config --exists gtk4 gtk4-layer-shell-0 cairo || {
+    printf '%s\n' "confetti: gtk4-layer-shell is required (install it with: omarchy pkg add gtk4-layer-shell)" >&2
+    exit 1
+  }
+  mkdir -p "$cache_dir"
+  temporary=$binary.$$
+  trap 'rm -f "$temporary"' EXIT HUP INT TERM
+  go -C "$plugin_dir" build -o "$temporary" ./cmd/confetti
+  chmod 755 "$temporary"
+  mv -f "$temporary" "$binary"
+  trap - EXIT HUP INT TERM
+fi
+
+exec "$binary" "$@"
